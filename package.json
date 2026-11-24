@@ -1,0 +1,16 @@
+{
+  "name": "project-pulse",
+  "version": "2.0.0",
+  "private": true,
+  "description": "PROJECT PULSE — local-first project monitoring dashboard",
+  "type": "module",
+  "workspaces": ["packages/*", "apps/*"],
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "npm run build -w @pulse/web && npm run build -w @pulse/server",
+    "start": "node --no-warnings=ExperimentalWarning apps/server/dist/server.mjs",
+    "typecheck": "npm run typecheck -w @pulse/server && npm run typecheck -w @pulse/web",
+    "test": "npm run test -w @pulse/server"
+  }
+}

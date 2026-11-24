@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+  --color-bg: var(--pp-bg);
+  --color-surface: var(--pp-surface);
+  --color-surface-2: var(--pp-surface-2);
+  --color-border: var(--pp-border);
+  --color-fg: var(--pp-text);
+  --color-muted: var(--pp-muted);
+  --color-primary: var(--pp-primary);
+  --color-success: var(--pp-success);
+  --color-warning: var(--pp-warning);
+  --color-danger: var(--pp-error);
+  --color-library: var(--pp-library);
+}
+
+:root, [data-theme=dark] {
+  color-scheme: dark;
+  --pp-bg: #0d1117; --pp-surface: #161b22; --pp-surface-2: #1c2128; --pp-border: #30363d;
+  --pp-text: #f0f6fc; --pp-muted: #8b949e; --pp-primary: #58a6ff; --pp-success: #3fb950;
+  --pp-warning: #d29922; --pp-error: #f85149; --pp-library: #a371f7;
+  /* chart tokens (validated categorical, dark) */
+  --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500; --series-5: #d55181;
+  --grid: #2c2c2a; --heat-0: #21262d; --heat-1: #0e4429; --heat-2: #006d32; --heat-3: #26a641; --heat-4: #39d353;
+}
+[data-theme=light] {
+  color-scheme: light;
+  --pp-bg: #f6f8fa; --pp-surface: #ffffff; --pp-surface-2: #f3f4f6; --pp-border: #d0d7de;
+  --pp-text: #1f2328; --pp-muted: #59636e; --pp-primary: #0969da; --pp-success: #1a7f37;
+  --pp-warning: #9a6700; --pp-error: #cf222e; --pp-library: #8250df;
+  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100; --series-5: #e87ba4;
+  --grid: #e1e0d9; --heat-0: #ebedf0; --heat-1: #9be9a8; --heat-2: #40c463; --heat-3: #30a14e; --heat-4: #216e39;
+}
+
+html, body, #root { height: 100%; }
+body { background: var(--pp-bg); color: var(--pp-text); font-family: var(--font-sans); font-size: 14px; -webkit-font-smoothing: antialiased; }
+::selection { background: color-mix(in srgb, var(--pp-primary) 35%, transparent); }
+* { scrollbar-width: thin; scrollbar-color: var(--pp-border) transparent; }
+code, .mono { font-family: var(--font-mono); }
+dialog::backdrop { background: rgb(1 4 9 / 0.65); backdrop-filter: blur(2px); }
+.checker { background-image: conic-gradient(#8883 25%, transparent 0 50%, #8883 0 75%, transparent 0); background-size: 16px 16px; }
+@keyframes pulse-dot { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+.animate-pulse-dot { animation: pulse-dot 1.4s ease-in-out infinite; }
