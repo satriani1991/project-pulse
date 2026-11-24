@@ -6,6 +6,8 @@ import { bulkRegisterSchema, discoverSchema, launchSchema, deploySchema, noteSch
 import { db, now, type Row } from '../database/db.js';
 import { createProject, deleteProject, getProject, HttpError, listProjects, saveThumbnail, summarize, updateProject } from '../services/projects.js';
 import { discover, inspectDirectory } from '../services/filesystem/discover.js';
+import { listDirectory, rememberPath, roots } from '../services/filesystem/browse.js';
+import { cancelDiscovery, getJob, latestJob, startDiscovery } from '../services/filesystem/discovery-jobs.js';
 import { scanProject } from '../services/filesystem/scanner.js';
 import { unwatchProject, watchProject } from '../services/watcher/watcher.js';
 import { onboardProject } from '../services/orchestrator.js';
@@ -39,6 +41,7 @@ export function projectRoutes(app: FastifyInstance) {
   app.post('/api/projects', async (req) => {
     const body = projectCreateSchema.parse(req.body);
     const p = createProject(body);
+    rememberPath(path.dirname(p.rootPath));
     audit('project.register', p.id, p.rootPath);
     void onboardProject(p.id).catch((e) => console.error('[onboard]', e));
     broadcast('project.updated', p.id);
@@ -56,6 +59,15 @@ export function projectRoutes(app: FastifyInstance) {
     broadcast('project.updated');
     return { created, errors };
   });
+
+  // In-app folder browser + background discovery (results stored in SQLite, UI reads them)
+  app.get('/api/fs/roots', async () => roots());
+  app.get<{ Querystring: { path: string; hidden?: string; fresh?: string } }>('/api/fs/list', async (req) => listDirectory(req.query.path, req.query.hidden === '1', req.query.fresh === '1'));
+  app.post('/api/fs/recent', async (req) => { const { path: p } = z.object({ path: z.string().min(1).max(1000) }).parse(req.body); rememberPath(p); return { ok: true }; });
+  app.post('/api/discovery', async (req) => { const b = discoverSchema.parse(req.body); return startDiscovery(b.rootPath, b.maxDepth ?? 2); });
+  app.get('/api/discovery/latest', async () => latestJob() ?? null);
+  app.get<{ Params: { id: string } }>('/api/discovery/:id', async (req) => { const j = getJob(req.params.id); if (!j) throw new HttpError(404, 'Discovery job not found'); return j; });
+  app.post<{ Params: { id: string } }>('/api/discovery/:id/cancel', async (req) => { cancelDiscovery(req.params.id); return { ok: true }; });
 
   app.post('/api/projects/discover', async (req) => { const b = discoverSchema.parse(req.body); return discover(b.rootPath, b.maxDepth ?? 2); });
   app.post('/api/projects/inspect', async (req) => {

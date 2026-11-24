@@ -169,6 +169,18 @@ CREATE TABLE IF NOT EXISTS health_checks (
   url TEXT NOT NULL, ok INTEGER NOT NULL, status INTEGER, latency_ms INTEGER, bytes INTEGER, error TEXT, checked_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_health ON health_checks(project_id, checked_at);
+CREATE TABLE IF NOT EXISTS recent_paths (path TEXT PRIMARY KEY, used_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS dir_cache (path TEXT PRIMARY KEY, entries TEXT NOT NULL, scanned_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS discovery_jobs (
+  id TEXT PRIMARY KEY, root_path TEXT NOT NULL, max_depth INTEGER NOT NULL, status TEXT NOT NULL,
+  dirs_scanned INTEGER NOT NULL DEFAULT 0, found INTEGER NOT NULL DEFAULT 0, current TEXT, error TEXT,
+  started_at TEXT NOT NULL, finished_at TEXT
+);
+CREATE TABLE IF NOT EXISTS discovery_results (
+  job_id TEXT NOT NULL REFERENCES discovery_jobs(id) ON DELETE CASCADE,
+  root_path TEXT NOT NULL, data TEXT NOT NULL, seq INTEGER NOT NULL,
+  PRIMARY KEY (job_id, root_path)
+);
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   action TEXT NOT NULL, project_id TEXT, detail TEXT, at TEXT NOT NULL

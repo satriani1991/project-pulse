@@ -64,7 +64,7 @@ export function Modal({ open, onClose, title, children, footer, wide }: { open: 
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => { const d = ref.current; if (!d) return; if (open && !d.open) d.showModal(); if (!open && d.open) d.close(); }, [open]);
   return (
-    <dialog ref={ref} onClose={onClose} onCancel={onClose}
+    <dialog ref={ref} onClose={(e) => { if (e.target === e.currentTarget) onClose(); }} onCancel={(e) => { if (e.target === e.currentTarget) onClose(); }}
       className={cx('m-auto max-h-[90vh] w-[calc(100%-2rem)] overflow-hidden rounded-xl border border-border bg-surface p-0 text-fg shadow-2xl', wide ? 'max-w-4xl' : 'max-w-xl')}>
       {open && (
         <div className="flex max-h-[90vh] flex-col">

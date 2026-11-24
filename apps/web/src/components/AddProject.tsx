@@ -1,28 +1,22 @@
 import { useEffect, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { FolderOpen, Search } from 'lucide-react';
 import type { DiscoveredProject, ProjectSummary } from '@pulse/shared';
 import { CATEGORIES } from '@pulse/shared';
 import { api } from '../services/api';
 import { setUi, useUi } from '../stores/ui';
 import { Badge, Button, Field, Input, Modal, Select, Toggle, useAction, useToast } from './ui';
+import { FolderPicker } from './FolderPicker';
+import { subscribe } from '../services/socket';
 import { CATEGORY_LABEL } from '../lib/format';
 
-async function pickFolder(): Promise<string | null> {
-  const r = await api.post<{ path: string | null }>('/api/system/pick-folder');
-  return r.path;
-}
-
-function PathInput({ value, onChange, onPicked, placeholder }: { value: string; onChange: (v: string) => void; onPicked?: (v: string) => void; placeholder?: string }) {
-  const toast = useToast();
-  const [busy, setBusy] = useState(false);
+function PathInput({ value, onChange, onPicked, placeholder, title }: { value: string; onChange: (v: string) => void; onPicked?: (v: string) => void; placeholder?: string; title?: string }) {
+  const [open, setOpen] = useState(false);
   return (
     <div className="flex gap-2">
-      <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="mono" />
-      <Button type="button" loading={busy} onClick={async () => {
-        setBusy(true);
-        try { const p = await pickFolder(); if (p) { onChange(p); onPicked?.(p); } } catch (e) { toast('info', (e as Error).message); } finally { setBusy(false); }
-      }}><FolderOpen className="size-4" />Browse</Button>
+      <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="mono flex-1" />
+      <Button type="button" onClick={() => setOpen(true)}><FolderOpen className="size-4" />Browse</Button>
+      <FolderPicker open={open} initial={value} title={title} onClose={() => setOpen(false)} onSelect={(p) => { onChange(p); onPicked?.(p); }} />
     </div>
   );
 }
@@ -69,7 +63,7 @@ export function AddProjectDialog({ onCreated }: { onCreated: (id: string) => voi
       <div className="grid gap-4 md:grid-cols-2">
         <Field label="Local directory" className="md:col-span-2" hint="Absolute path, e.g. C:\ProjectX\TKA — metadata is detected automatically.">
           <div className="flex gap-2">
-            <div className="flex-1"><PathInput value={f.rootPath} onChange={(v) => set({ rootPath: v })} onPicked={(v) => inspect(v)} placeholder="C:\ProjectX\TKA" /></div>
+            <div className="flex-1"><PathInput value={f.rootPath} onChange={(v) => set({ rootPath: v })} onPicked={(v) => inspect(v)} placeholder="C:\ProjectX\TKA" title="Select project folder" /></div>
             <Button loading={busy === 'inspect'} onClick={() => inspect()}><Search className="size-4" />Detect</Button>
           </div>
         </Field>
@@ -105,45 +99,79 @@ export function AddProjectDialog({ onCreated }: { onCreated: (id: string) => voi
   );
 }
 
+interface DiscoveryJob { id: string; rootPath: string; maxDepth: number; status: 'running' | 'done' | 'cancelled' | 'failed'; dirsScanned: number; found: number; current?: string; error?: string; results: DiscoveredProject[] }
+
+/** Bulk discovery runs as a backend job; results are stored in SQLite and streamed into this list. */
 export function DiscoverDialog() {
   const open = useUi((s) => s.discover);
   const [root, setRoot] = useState('');
   const [depth, setDepth] = useState(2);
-  const [items, setItems] = useState<DiscoveredProject[] | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
+  const [touched, setTouched] = useState(false);
   const { busy, run } = useAction();
   const toast = useToast();
   const qc = useQueryClient();
-  useEffect(() => { if (open) { setItems(null); setSel(new Set()); } }, [open]);
+  // Re-open: show the last discovery from the database instantly
+  const { data: latest } = useQuery({ queryKey: ['discovery-latest'], enabled: open, queryFn: () => api.get<DiscoveryJob | null>('/api/discovery/latest'), staleTime: 0 });
+  useEffect(() => { if (open && latest && !jobId) { setJobId(latest.id); setRoot((r) => r || latest.rootPath); setDepth(latest.maxDepth); } }, [open, latest, jobId]);
+  useEffect(() => { if (!open) { setTouched(false); } }, [open]);
+  const { data: job } = useQuery({
+    queryKey: ['discovery', jobId], enabled: open && !!jobId,
+    queryFn: () => api.get<DiscoveryJob>(`/api/discovery/${jobId}`),
+    refetchInterval: (q) => (q.state.data?.status === 'running' ? 700 : false),
+  });
+  useEffect(() => open ? subscribe((m) => { if (m.type === 'discovery.progress' && (m.data as { id?: string })?.id === jobId) qc.invalidateQueries({ queryKey: ['discovery', jobId] }); }) : undefined, [open, jobId, qc]);
+  // auto-select new, non-nested, unregistered results until the user edits the selection
+  useEffect(() => {
+    if (!job || touched) return;
+    setSel(new Set(job.results.filter((x) => !x.alreadyRegistered && !x.nested).map((x) => x.rootPath)));
+  }, [job, touched]);
   const scan = async (path = root) => {
-    const r = await run('scan', () => api.post<DiscoveredProject[]>('/api/projects/discover', { rootPath: path, maxDepth: depth }));
-    if (r) { setItems(r); setSel(new Set(r.filter((x) => !x.alreadyRegistered && !x.nested).map((x) => x.rootPath))); }
+    if (!path.trim()) return;
+    const j = await run('scan', () => api.post<DiscoveryJob>('/api/discovery', { rootPath: path, maxDepth: depth }));
+    if (j) { setJobId(j.id); setTouched(false); setSel(new Set()); }
   };
+  const cancel = () => jobId && api.post(`/api/discovery/${jobId}/cancel`).then(() => qc.invalidateQueries({ queryKey: ['discovery', jobId] }));
   const register = async () => {
-    const chosen = items!.filter((i) => sel.has(i.rootPath));
+    const chosen = (job?.results ?? []).filter((i) => sel.has(i.rootPath));
     const r = await run('reg', () => api.post<{ created: string[]; errors: { rootPath: string; error: string }[] }>('/api/projects/bulk', {
       projects: chosen.map((c) => ({ rootPath: c.rootPath, name: c.name, category: c.category, technologies: c.technologies, commands: c.commands, description: c.description, thumbnailPath: c.thumbnailPath,
         deployment: c.deployment ? { provider: c.deployment.provider, firebaseProjectId: c.deployment.firebaseProjectId, hostingSiteId: c.deployment.hostingSiteId, remotePath: c.deployment.remotePath, publicUrl: c.deployment.publicUrl, deployDirectory: c.deployment.deployDirectory } : undefined })),
     }));
     if (r) {
-      toast(r.errors.length ? 'error' : 'success', `Registered ${r.created.length} project(s)${r.errors.length ? `, ${r.errors.length} failed: ${r.errors[0].error}` : ''}`);
+      toast(r.errors.length ? 'error' : 'success', `Registered ${r.created.length} project(s)${r.errors.length ? `, ${r.errors.length} failed: ${r.errors[0].error}` : ''} — scanning files in the background`);
       qc.invalidateQueries(); setUi({ discover: false });
     }
   };
-  const toggle = (p: string) => setSel((s) => { const n = new Set(s); if (n.has(p)) n.delete(p); else n.add(p); return n; });
+  const toggle = (p: string) => { setTouched(true); setSel((s) => { const n = new Set(s); if (n.has(p)) n.delete(p); else n.add(p); return n; }); };
+  const selectable = (job?.results ?? []).filter((r) => !r.alreadyRegistered);
+  const running = job?.status === 'running';
   return (
     <Modal open={open} onClose={() => setUi({ discover: false })} title="Bulk project discovery" wide
-      footer={<><Button onClick={() => setUi({ discover: false })}>Cancel</Button><Button variant="success" disabled={!sel.size} loading={busy === 'reg'} onClick={register}>Register {sel.size} project(s)</Button></>}>
-      <p className="mb-3 text-sm text-muted">Select a parent directory. Subfolders containing <code>package.json</code>, <code>index.html</code>, <code>firebase.json</code>, <code>.git</code>, <code>go.mod</code>, <code>README.md</code> or <code>pulse.json</code> are detected. Review before registering.</p>
+      footer={<>
+        {selectable.length > 0 && <Button variant="ghost" className="mr-auto" onClick={() => { setTouched(true); setSel(sel.size === selectable.length ? new Set() : new Set(selectable.map((r) => r.rootPath))); }}>{sel.size === selectable.length ? 'Select none' : 'Select all'}</Button>}
+        <Button onClick={() => setUi({ discover: false })}>Close</Button>
+        <Button variant="success" disabled={!sel.size} loading={busy === 'reg'} onClick={register}>Register {sel.size} project(s)</Button>
+      </>}>
+      <p className="mb-3 text-sm text-muted">Pick a parent directory. The server scans it in the background and saves what it finds — you can close this dialog and come back. Subfolders containing <code>package.json</code>, <code>index.html</code>, <code>firebase.json</code>, <code>.git</code>, <code>go.mod</code>, <code>README.md</code> or <code>pulse.json</code> are detected.</p>
       <div className="flex gap-2">
-        <div className="flex-1"><PathInput value={root} onChange={setRoot} onPicked={(p) => scan(p)} placeholder="C:\ProjectX" /></div>
+        <div className="flex-1"><PathInput value={root} onChange={setRoot} onPicked={(p) => scan(p)} placeholder="C:\ProjectX" title="Select parent folder to scan" /></div>
         <Select value={depth} onChange={(e) => setDepth(Number(e.target.value))} aria-label="Depth">{[1, 2, 3, 4].map((d) => <option key={d} value={d}>Depth {d}</option>)}</Select>
-        <Button variant="primary" loading={busy === 'scan'} disabled={!root} onClick={() => scan()}><Search className="size-4" />Scan</Button>
+        {running ? <Button variant="danger" onClick={cancel}>Stop</Button> : <Button variant="primary" loading={busy === 'scan'} disabled={!root} onClick={() => scan()}><Search className="size-4" />Scan</Button>}
       </div>
-      {items && (
-        <div className="mt-4 overflow-hidden rounded-lg border border-border">
-          {items.length === 0 && <p className="p-4 text-sm text-muted">No projects found.</p>}
-          {items.map((i) => (
+      {job && (
+        <div className="mt-3 flex items-center gap-2 text-xs text-muted">
+          {running && <span className="size-2 animate-pulse-dot rounded-full bg-primary" />}
+          <span>{running ? 'Scanning' : job.status === 'done' ? 'Scan complete' : job.status === 'cancelled' ? 'Scan stopped' : 'Scan failed'} · <code>{job.rootPath}</code> · {job.dirsScanned} folders checked · {job.found} project(s) found</span>
+          {running && job.current && <span className="mono truncate">— {job.current}</span>}
+          {job.error && <span className="text-danger">{job.error}</span>}
+        </div>
+      )}
+      {job && (
+        <div className="mt-3 max-h-[45vh] overflow-y-auto rounded-lg border border-border">
+          {job.results.length === 0 && <p className="p-4 text-sm text-muted">{running ? 'Looking for projects…' : 'No projects found. Try a deeper scan or another folder.'}</p>}
+          {job.results.map((i) => (
             <label key={i.rootPath} className="flex cursor-pointer items-start gap-3 border-b border-border px-3 py-2.5 last:border-0 hover:bg-surface-2">
               <input type="checkbox" className="mt-1 accent-[var(--pp-success)]" disabled={i.alreadyRegistered} checked={sel.has(i.rootPath)} onChange={() => toggle(i.rootPath)} />
               <div className="min-w-0 flex-1">

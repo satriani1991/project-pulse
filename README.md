@@ -12,7 +12,8 @@ actually serving — **per project path**, so deploying one game on a shared sit
 2. Double-click **`start.bat`**. The first run installs dependencies (`npm install`) and builds; afterwards it opens
    <http://127.0.0.1:7700>.
 3. Click **Discover** and select `C:\ProjectX` to register all games and libraries at once, or **Add Project** for a single folder
-   (the **Browse** button opens a native Windows folder picker).
+   (**Browse** opens a built-in folder browser: drives, recent and project folders, with project folders highlighted).
+   Discovery runs in the background on the server and saves its results, so you can close the dialog and come back.
 4. For Firebase-hosted projects, set the **hosting site**, **remote path** (e.g. `/games/tka/`) and **deploy directory**
    (`.` for vanilla canvas games, `dist` for Vite builds). Discovery fills these in automatically when it finds `firebase.json`.
 

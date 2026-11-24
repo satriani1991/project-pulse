@@ -12,6 +12,7 @@ import { recommendations } from '../services/recommendations/recommendations.js'
 import { backupDatabase } from '../services/backup/backup.js';
 import { indexAssets } from '../services/assets/assets.js';
 import { markStaleProcesses } from '../services/process-manager/processes.js';
+import { markStaleDiscoveries } from '../services/filesystem/discovery-jobs.js';
 import { DEFAULT_WS, listWorkspaces, runInWorkspace } from '../workspace/context.js';
 
 const running = new Set<string>();
@@ -50,7 +51,7 @@ export const refreshAllGit = async () => { for (const p of listProjects()) await
  * then start real-time watchers and periodic jobs (PRD §16.2).
  */
 export async function startBackground() {
-  await job('startup-stale', markStaleProcesses);
+  await job('startup-stale', () => { markStaleProcesses(); markStaleDiscoveries(); });
   await job('startup-reconcile', async () => {
     for (const p of listProjects()) { await scanProject(p.id); indexAssets(p.id); }
   });
